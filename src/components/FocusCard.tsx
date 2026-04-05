@@ -3,6 +3,7 @@
 import { motion } from 'framer-motion';
 import type { Task } from '@/types';
 import { useObjectPermanence } from '@/hooks/useObjectPermanence';
+import { springs, urgencyColor, BREATH_CYCLE } from '@/lib/springs';
 
 interface FocusCardProps {
   task: Task | null;
@@ -18,13 +19,14 @@ export default function FocusCard({ task }: FocusCardProps) {
 
   if (!task) {
     return (
-      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 text-center text-zinc-500">
+      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 text-center text-zinc-500 font-wt-background">
         Click a segment on the dial to view task details
       </div>
     );
   }
 
   const isActive = task.status === 'active';
+  const uColor = urgencyColor(task.icnu_score.urgency);
 
   return (
     <motion.div
@@ -44,14 +46,16 @@ export default function FocusCard({ task }: FocusCardProps) {
       }}
       transition={
         isActive && shouldPulse
-          ? { boxShadow: { duration: 2, repeat: Infinity } }
-          : { duration: 0.2 }
+          ? { boxShadow: { ...BREATH_CYCLE, duration: 2 } }
+          : springs.medium
       }
       className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6"
     >
       <div className="flex items-start justify-between mb-3">
-        <h3 className="text-xl font-bold text-white">{task.title}</h3>
-        <span
+        <h3 className="text-xl text-white font-wt-active">{task.title}</h3>
+        <motion.span
+          whileTap={{ scale: 0.9 }}
+          transition={springs.bounce}
           className={`text-xs font-medium px-2 py-1 rounded-full ${
             task.status === 'active'
               ? 'bg-green-500/20 text-green-400'
@@ -61,20 +65,40 @@ export default function FocusCard({ task }: FocusCardProps) {
           }`}
         >
           {task.status}
-        </span>
+        </motion.span>
       </div>
 
-      {/* ICNU Score */}
+      {/* ICNU Score with urgency color accent */}
       <div className="grid grid-cols-4 gap-2 mb-4">
         {(['interest', 'challenge', 'novelty', 'urgency'] as const).map((key) => (
-          <div key={key} className="text-center">
+          <motion.div
+            key={key}
+            className="text-center rounded-lg py-1"
+            style={{
+              backgroundColor:
+                key === 'urgency' && task.icnu_score.urgency >= 7
+                  ? `${uColor}15`
+                  : 'transparent',
+            }}
+            whileHover={{ scale: 1.05 }}
+            transition={springs.snap}
+          >
             <div className="text-xs text-zinc-500 uppercase tracking-wider">{key[0]}</div>
-            <div className="text-lg font-semibold text-white">{task.icnu_score[key]}</div>
-          </div>
+            <div
+              className="text-lg text-white"
+              style={{
+                fontWeight: key === 'urgency' ? 600 : 400,
+                fontVariationSettings: `'wght' ${key === 'urgency' ? 600 : 400}`,
+                color: key === 'urgency' ? uColor : undefined,
+              }}
+            >
+              {task.icnu_score[key]}
+            </div>
+          </motion.div>
         ))}
       </div>
 
-      <div className="flex items-center justify-between text-sm text-zinc-400">
+      <div className="flex items-center justify-between text-sm text-zinc-400 font-wt-background">
         <span>ICNU Total: {icnuTotal(task)}</span>
         <span>
           Dopamine:{' '}
@@ -83,18 +107,19 @@ export default function FocusCard({ task }: FocusCardProps) {
       </div>
 
       {task.duration && (
-        <div className="mt-3 text-sm text-zinc-500">
+        <div className="mt-3 text-sm text-zinc-500 font-wt-background">
           Duration: {task.duration} min
         </div>
       )}
 
       {isActive && shouldPulse && (
         <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
+          initial={{ opacity: 0, y: 5 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={springs.smooth}
           className="mt-3 text-xs text-amber-400 text-center"
         >
-          ⚡ Still working on this? You&apos;ve been quiet for a while.
+          Still working on this? You&apos;ve been quiet for a while.
         </motion.div>
       )}
     </motion.div>

@@ -3,6 +3,7 @@
 import { useMemo, useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import type { Task } from '@/types';
+import { urgencyColor, BREATH_CYCLE, springs } from '@/lib/springs';
 
 interface RadialTimeDialProps {
   tasks: Task[];
@@ -17,9 +18,8 @@ const INNER_R = 100;
 const HOUR_MARKS_R = 180;
 
 function timeToAngle(hours: number, minutes: number = 0): number {
-  // 0 degrees = 12:00 (top), clockwise
   const totalHours = hours + minutes / 60;
-  return (totalHours / 24) * 360 - 90; // -90 to rotate so 0h is at top
+  return (totalHours / 24) * 360 - 90;
 }
 
 function degToRad(deg: number): number {
@@ -66,7 +66,7 @@ export default function RadialTimeDial({
   const [now, setNow] = useState(new Date());
 
   useEffect(() => {
-    const interval = setInterval(() => setNow(new Date()), 60_000); // update every minute
+    const interval = setInterval(() => setNow(new Date()), 60_000);
     return () => clearInterval(interval);
   }, []);
 
@@ -74,13 +74,11 @@ export default function RadialTimeDial({
     return timeToAngle(now.getHours(), now.getMinutes());
   }, [now]);
 
-  // "Past" arc: from midnight to now
   const pastArc = useMemo(() => {
     const startAngle = timeToAngle(0);
     return describeArc(CENTER, CENTER, OUTER_R, INNER_R, startAngle, nowAngle);
   }, [nowAngle]);
 
-  // Task arcs
   const taskArcs = useMemo(() => {
     return tasks
       .filter((t) => t.start_time && t.duration)
@@ -90,11 +88,12 @@ export default function RadialTimeDial({
         const durationDegrees = (task.duration! / (24 * 60)) * 360;
         const endAngle = startAngle + durationDegrees;
         const path = describeArc(CENTER, CENTER, OUTER_R, INNER_R, startAngle, endAngle);
-        return { task, path, startAngle, endAngle };
+        // Use urgency-based color when no explicit color set
+        const color = task.color_hex || urgencyColor(task.icnu_score.urgency);
+        return { task, path, startAngle, endAngle, color };
       });
   }, [tasks]);
 
-  // Hour markers
   const hourMarkers = useMemo(() => {
     return Array.from({ length: 24 }, (_, i) => {
       const angle = timeToAngle(i);
@@ -105,8 +104,26 @@ export default function RadialTimeDial({
     });
   }, []);
 
-  // "Now" indicator position
   const nowPos = polarToCartesian(CENTER, CENTER, OUTER_R + 8, nowAngle);
+
+  // Find the most urgent upcoming task for ambient urgency cue
+  const maxUpcomingUrgency = useMemo(() => {
+    const nowH = now.getHours() + now.getMinutes() / 60;
+    return Math.max(
+      0,
+      ...tasks
+        .filter((t) => {
+          if (!t.start_time) return false;
+          const s = new Date(t.start_time);
+          const sh = s.getHours() + s.getMinutes() / 60;
+          return sh > nowH && sh - nowH < 2; // within 2 hours
+        })
+        .map((t) => t.icnu_score.urgency)
+    );
+  }, [tasks, now]);
+
+  // Ambient urgency ring color
+  const ambientColor = urgencyColor(maxUpcomingUrgency);
 
   return (
     <svg
@@ -116,7 +133,6 @@ export default function RadialTimeDial({
       aria-label="24-hour radial time dial"
     >
       <defs>
-        {/* Hatch pattern for past time */}
         <pattern
           id="pastHatch"
           patternUnits="userSpaceOnUse"
@@ -126,9 +142,16 @@ export default function RadialTimeDial({
         >
           <line x1="0" y1="0" x2="0" y2="6" stroke="#3f3f46" strokeWidth="1.5" />
         </pattern>
-        {/* Glow filter for "now" indicator */}
         <filter id="nowGlow" x="-50%" y="-50%" width="200%" height="200%">
-          <feGaussianBlur stdDeviation="3" result="blur" />
+          <feGaussianBlur stdDeviation="4" result="blur" />
+          <feMerge>
+            <feMergeNode in="blur" />
+            <feMergeNode in="SourceGraphic" />
+          </feMerge>
+        </filter>
+        {/* Breathing glow for the dial ring — ambient urgency */}
+        <filter id="dialBreath" x="-20%" y="-20%" width="140%" height="140%">
+          <feGaussianBlur stdDeviation="2" result="blur" />
           <feMerge>
             <feMergeNode in="blur" />
             <feMergeNode in="SourceGraphic" />
@@ -136,38 +159,42 @@ export default function RadialTimeDial({
         </filter>
       </defs>
 
-      {/* Background ring */}
-      <circle
+      {/* Ambient urgency breathing ring — peripheral cue */}
+      <motion.circle
         cx={CENTER}
         cy={CENTER}
-        r={OUTER_R}
+        r={OUTER_R + 1}
         fill="none"
-        stroke="#27272a"
-        strokeWidth="1"
+        stroke={ambientColor}
+        strokeWidth="1.5"
+        filter="url(#dialBreath)"
+        animate={{
+          opacity: maxUpcomingUrgency > 3 ? [0.15, 0.35, 0.15] : [0.05, 0.1, 0.05],
+          strokeWidth: maxUpcomingUrgency > 7 ? [1.5, 3, 1.5] : [1, 1.5, 1],
+        }}
+        transition={BREATH_CYCLE}
       />
-      <circle
-        cx={CENTER}
-        cy={CENTER}
-        r={INNER_R}
-        fill="none"
-        stroke="#27272a"
-        strokeWidth="1"
-      />
+
+      {/* Background rings */}
+      <circle cx={CENTER} cy={CENTER} r={OUTER_R} fill="none" stroke="#27272a" strokeWidth="1" />
+      <circle cx={CENTER} cy={CENTER} r={INNER_R} fill="none" stroke="#27272a" strokeWidth="1" />
 
       {/* Past arc with hatch */}
       <path d={pastArc} fill="url(#pastHatch)" opacity="0.4" />
 
-      {/* Task arcs */}
-      {taskArcs.map(({ task, path }) => (
+      {/* Task arcs — with urgency color fallback and spring interaction */}
+      {taskArcs.map(({ task, path, color }) => (
         <motion.path
           key={task.id}
           d={path}
-          fill={task.color_hex || '#6366f1'}
+          fill={color}
           opacity={selectedTaskId === task.id ? 1 : 0.7}
           stroke={selectedTaskId === task.id ? '#fff' : 'none'}
           strokeWidth={selectedTaskId === task.id ? 2 : 0}
           className="cursor-pointer"
-          whileHover={{ opacity: 0.9 }}
+          whileHover={{ opacity: 0.9, scale: 1.01 }}
+          whileTap={{ scale: 0.99 }}
+          transition={springs.snap}
           onClick={() =>
             onSelectTask(selectedTaskId === task.id ? null : task.id)
           }
@@ -199,15 +226,39 @@ export default function RadialTimeDial({
         </g>
       ))}
 
-      {/* "Now" glowing indicator */}
+      {/* "Now" indicator — 60bpm breathing pulse anchored to present */}
       <motion.circle
         cx={nowPos.x}
         cy={nowPos.y}
         r="6"
         fill="#f59e0b"
         filter="url(#nowGlow)"
-        animate={{ r: [5, 7, 5] }}
-        transition={{ duration: 2, repeat: Infinity }}
+        animate={{
+          r: [5, 8, 5],
+          opacity: [0.8, 1, 0.8],
+        }}
+        transition={{
+          duration: BREATH_CYCLE.duration,
+          repeat: Infinity,
+          ease: BREATH_CYCLE.ease,
+        }}
+      />
+      {/* Secondary breathing ring around "Now" */}
+      <motion.circle
+        cx={nowPos.x}
+        cy={nowPos.y}
+        fill="none"
+        stroke="#f59e0b"
+        strokeWidth="1"
+        animate={{
+          r: [10, 16, 10],
+          opacity: [0.4, 0.1, 0.4],
+        }}
+        transition={{
+          duration: BREATH_CYCLE.duration,
+          repeat: Infinity,
+          ease: BREATH_CYCLE.ease,
+        }}
       />
 
       {/* Center time display */}
@@ -217,6 +268,7 @@ export default function RadialTimeDial({
         textAnchor="middle"
         dominantBaseline="middle"
         className="fill-white text-lg font-bold select-none"
+        style={{ fontWeight: 600, fontVariationSettings: "'wght' 600" }}
       >
         {now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
       </text>
@@ -226,6 +278,7 @@ export default function RadialTimeDial({
         textAnchor="middle"
         dominantBaseline="middle"
         className="fill-zinc-500 text-[10px] select-none"
+        style={{ fontWeight: 300, fontVariationSettings: "'wght' 300" }}
       >
         {now.toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })}
       </text>

@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useStore } from '@/store/useStore';
 import { useVoiceCapture } from '@/hooks/useVoiceCapture';
+import { springs, BREATH_CYCLE } from '@/lib/springs';
 
 export default function LightningCapture() {
   const { captureOverlayOpen, setCaptureOverlayOpen, addCapture } = useStore();
@@ -91,7 +92,7 @@ export default function LightningCapture() {
             viewBox="0 0 200 200"
             className="mb-8"
             animate={{ scale: isListening ? pulseScale : 1 }}
-            transition={{ type: 'spring', stiffness: 300, damping: 20 }}
+            transition={springs.medium}
           >
             <defs>
               <radialGradient id="captureGlow" cx="50%" cy="50%" r="50%">
@@ -116,7 +117,7 @@ export default function LightningCapture() {
                 stroke="#a5b4fc"
                 strokeWidth="3"
                 animate={{ r: [90, 95, 90], opacity: [0.6, 0.2, 0.6] }}
-                transition={{ duration: 1.5, repeat: Infinity }}
+                transition={BREATH_CYCLE}
               />
             )}
           </motion.svg>
@@ -139,7 +140,8 @@ export default function LightningCapture() {
           {/* Done button */}
           <motion.button
             whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
+            whileTap={{ scale: 0.92 }}
+            transition={springs.snap}
             onClick={handleDone}
             className="mt-6 px-12 py-3 bg-indigo-500 hover:bg-indigo-400 text-white font-semibold text-lg rounded-full transition-colors"
           >
