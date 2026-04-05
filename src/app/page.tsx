@@ -7,6 +7,11 @@ import { useAnchorStore } from '@/engine/anchor/store';
 import { useResumption } from '@/hooks/useResumption';
 import { springs, urgencyColor } from '@/lib/springs';
 import {
+  type EnergyLevel,
+  rankTasks,
+  filterByEnergy,
+} from '@/engine/anchor/icnu-engine';
+import {
   startBodyDouble,
   stopBodyDouble,
   startSnapshotTimer,
@@ -27,6 +32,9 @@ import BreadcrumbSidebar from '@/components/BreadcrumbSidebar';
 import BodyDoubleNudge from '@/components/BodyDoubleNudge';
 import AntiParalysisOverlay from '@/components/AntiParalysisOverlay';
 import ReviewFlagBanner from '@/components/ReviewFlagBanner';
+import EnergySlider from '@/components/EnergySlider';
+import ActivationBridge from '@/components/ActivationBridge';
+import DetailScentsHUD from '@/components/DetailScentsHUD';
 
 // Seed demo tasks so the dial isn't empty on first load
 const DEMO_TASKS = [
@@ -97,8 +105,20 @@ export default function Home() {
   const addSnapshot = useAnchorStore((s) => s.addSnapshot);
   const checkAntiParalysis = useAnchorStore((s) => s.checkAntiParalysis);
   const [showAntiParalysis, setShowAntiParalysis] = useState(false);
+  const [energy, setEnergy] = useState<EnergyLevel>(3);
+  const [activationBridge, setActivationBridge] = useState<{
+    active: boolean;
+    taskId: string;
+    entries: { id: string; text: string; done: boolean }[];
+  }>({ active: false, taskId: '', entries: [] });
 
-  const tasks = storedTasks.length > 0 ? storedTasks : DEMO_TASKS;
+  const allTasks = storedTasks.length > 0 ? storedTasks : DEMO_TASKS;
+
+  // Filter and rank tasks by energy level + ICNU Focus Score
+  const tasks = useMemo(
+    () => rankTasks(filterByEnergy(allTasks, energy), energy),
+    [allTasks, energy]
+  );
 
   const selectedTask = useMemo(
     () => tasks.find((t) => t.id === selectedTaskId) ?? null,
@@ -114,6 +134,44 @@ export default function Home() {
     (id: string | null) => setSelectedTask(id),
     [setSelectedTask]
   );
+
+  // ── Activation Bridge: Start Task with Micro-Entry Path ──
+  const handleStartTask = useCallback(
+    (taskId: string) => {
+      const task = allTasks.find((t) => t.id === taskId);
+      if (!task) return;
+
+      // Generate 3 micro-entry tasks (< 2 min each)
+      const entries = [
+        { id: `${taskId}-e1`, text: `Open workspace for "${task.title}"`, done: false },
+        { id: `${taskId}-e2`, text: 'Scan where you left off — find the first thing to change', done: false },
+        { id: `${taskId}-e3`, text: 'Make one small edit or write one sentence', done: false },
+      ];
+
+      setActivationBridge({ active: true, taskId, entries });
+      dispatch({ type: 'BEGIN_TASK', taskId });
+    },
+    [allTasks, dispatch]
+  );
+
+  const handleToggleBridgeEntry = useCallback((entryId: string) => {
+    setActivationBridge((prev) => ({
+      ...prev,
+      entries: prev.entries.map((e) =>
+        e.id === entryId ? { ...e, done: !e.done } : e
+      ),
+    }));
+  }, []);
+
+  const handleBridgeComplete = useCallback(() => {
+    setActivationBridge((prev) => ({ ...prev, active: false }));
+    dispatch({ type: 'FOCUS_ACHIEVED' });
+  }, [dispatch]);
+
+  const handleBridgeAbort = useCallback(() => {
+    setActivationBridge((prev) => ({ ...prev, active: false }));
+    dispatch({ type: 'RESET' });
+  }, [dispatch]);
 
   // ── Body Double Protocol ──
   useEffect(() => {
@@ -227,23 +285,50 @@ export default function Home() {
                 tasks={tasks}
                 onSelectTask={handleSelectTask}
                 selectedTaskId={selectedTaskId}
+                energyLevel={energy}
+                onStartTask={handleStartTask}
               />
-              <div className="w-full max-w-[600px]">
-                <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3 px-1">
-                  Knowledge Graph
-                </h2>
-                <KnowledgeGraph />
-              </div>
+              {/* Knowledge Graph hidden during Deep Focus */}
+              {fsmState !== 'DEEP_FOCUS' && (
+                <div className="w-full max-w-[600px]">
+                  <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3 px-1">
+                    Knowledge Graph
+                  </h2>
+                  <KnowledgeGraph />
+                </div>
+              )}
             </div>
           </FocusLens>
 
           {/* Right: Sidebar */}
           <aside className="w-full lg:w-96 flex flex-col gap-4">
+            {/* Energy-to-Task Matching Slider */}
+            <EnergySlider value={energy} onChange={setEnergy} />
+
             {/* Engine Status */}
             <EngineStatus />
 
-            {/* Focus Card */}
+            {/* Focus Card with Start button */}
             <FocusCard task={selectedTask} />
+
+            {/* "Start" button on selected task triggers Activation Bridge */}
+            {selectedTask && selectedTask.status !== 'done' && fsmState === 'IDLE' && (
+              <motion.button
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                transition={springs.snap}
+                onClick={() => handleStartTask(selectedTask.id)}
+                className="w-full py-3 bg-indigo-500 hover:bg-indigo-400 text-white font-wt-active text-sm rounded-xl transition-colors"
+              >
+                Start → Activation Bridge
+              </motion.button>
+            )}
+
+            {/* Detail Scents HUD — only during Deep Focus */}
+            <DetailScentsHUD
+              visible={fsmState === 'DEEP_FOCUS'}
+              taskTitle={activeTask?.title || ''}
+            />
 
             {/* Micro-Actions for active task */}
             {activeTask && <MicroActionList task={activeTask} />}
@@ -351,6 +436,17 @@ export default function Home() {
             setShowAntiParalysis(false);
           }}
         />
+        {/* Activation Bridge — full-screen UI lock for task initiation */}
+        {activationBridge.active && (
+          <ActivationBridge
+            active={activationBridge.active}
+            task={allTasks.find((t) => t.id === activationBridge.taskId) || allTasks[0]}
+            microEntries={activationBridge.entries}
+            onComplete={handleBridgeComplete}
+            onAbort={handleBridgeAbort}
+            onToggleEntry={handleToggleBridgeEntry}
+          />
+        )}
       </div>
     </AirlockGatekeeper>
   );

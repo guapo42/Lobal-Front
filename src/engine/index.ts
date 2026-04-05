@@ -33,6 +33,8 @@
  */
 
 // Anchor Engine
+export { calculateFocusScore, rankTasks, filterByEnergy, wedgeExpansion, getWeightProfile } from './anchor/icnu-engine';
+export type { EnergyLevel, ICNUScores } from './anchor/icnu-engine';
 export { transition, createFSMContext, shouldTriggerAntiParalysis } from './anchor/fsm';
 export type { FSMState, FSMEvent, FSMContext } from './anchor/fsm';
 export { validateLLMOutput, isKnownTool, registerTool } from './anchor/schema-validator';

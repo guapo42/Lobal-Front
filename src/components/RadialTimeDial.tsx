@@ -4,11 +4,18 @@ import { useMemo, useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import type { Task } from '@/types';
 import { urgencyColor, BREATH_CYCLE, springs } from '@/lib/springs';
+import {
+  type EnergyLevel,
+  calculateFocusScore,
+  wedgeExpansion,
+} from '@/engine/anchor/icnu-engine';
 
 interface RadialTimeDialProps {
   tasks: Task[];
   onSelectTask: (id: string | null) => void;
   selectedTaskId: string | null;
+  energyLevel?: EnergyLevel;
+  onStartTask?: (taskId: string) => void;
 }
 
 const SIZE = 400;
@@ -62,6 +69,8 @@ export default function RadialTimeDial({
   tasks,
   onSelectTask,
   selectedTaskId,
+  energyLevel = 3,
+  onStartTask,
 }: RadialTimeDialProps) {
   const [now, setNow] = useState(new Date());
 
@@ -85,14 +94,17 @@ export default function RadialTimeDial({
       .map((task) => {
         const start = new Date(task.start_time!);
         const startAngle = timeToAngle(start.getHours(), start.getMinutes());
-        const durationDegrees = (task.duration! / (24 * 60)) * 360;
+        // Focus Score drives wedge expansion — high-score tasks get wider
+        const focusScore = calculateFocusScore(task.icnu_score, energyLevel);
+        const expansion = wedgeExpansion(focusScore);
+        const baseDegrees = (task.duration! / (24 * 60)) * 360;
+        const durationDegrees = baseDegrees * expansion;
         const endAngle = startAngle + durationDegrees;
         const path = describeArc(CENTER, CENTER, OUTER_R, INNER_R, startAngle, endAngle);
-        // Use urgency-based color when no explicit color set
         const color = task.color_hex || urgencyColor(task.icnu_score.urgency);
-        return { task, path, startAngle, endAngle, color };
+        return { task, path, startAngle, endAngle, color, focusScore };
       });
-  }, [tasks]);
+  }, [tasks, energyLevel]);
 
   const hourMarkers = useMemo(() => {
     return Array.from({ length: 24 }, (_, i) => {
@@ -183,21 +195,22 @@ export default function RadialTimeDial({
       <path d={pastArc} fill="url(#pastHatch)" opacity="0.4" />
 
       {/* Task arcs — with urgency color fallback and spring interaction */}
-      {taskArcs.map(({ task, path, color }) => (
+      {taskArcs.map(({ task, path, color, focusScore }) => (
         <motion.path
           key={task.id}
           d={path}
           fill={color}
-          opacity={selectedTaskId === task.id ? 1 : 0.7}
+          opacity={selectedTaskId === task.id ? 1 : 0.4 + focusScore * 0.5}
           stroke={selectedTaskId === task.id ? '#fff' : 'none'}
           strokeWidth={selectedTaskId === task.id ? 2 : 0}
           className="cursor-pointer"
-          whileHover={{ opacity: 0.9, scale: 1.01 }}
+          whileHover={{ opacity: 0.95, scale: 1.01 }}
           whileTap={{ scale: 0.99 }}
           transition={springs.snap}
           onClick={() =>
             onSelectTask(selectedTaskId === task.id ? null : task.id)
           }
+          onDoubleClick={() => onStartTask?.(task.id)}
         />
       ))}
 
