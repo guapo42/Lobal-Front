@@ -1,11 +1,17 @@
 'use client';
 
-import { useCallback, useMemo, useEffect } from 'react';
+import { useCallback, useMemo, useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { useStore } from '@/store/useStore';
+import { useAnchorStore } from '@/engine/anchor/store';
 import { useResumption } from '@/hooks/useResumption';
-import { springs } from '@/lib/springs';
-import { urgencyColor } from '@/lib/springs';
+import { springs, urgencyColor } from '@/lib/springs';
+import {
+  startBodyDouble,
+  stopBodyDouble,
+  startSnapshotTimer,
+  stopSnapshotTimer,
+} from '@/engine/anchor/guardrails';
 import AirlockGatekeeper from '@/components/AirlockGatekeeper';
 import LightningCapture from '@/components/LightningCapture';
 import RadialTimeDial from '@/components/RadialTimeDial';
@@ -16,6 +22,11 @@ import ResumptionCard from '@/components/ResumptionCard';
 import UndoTimeline from '@/components/UndoTimeline';
 import MicroActionList from '@/components/MicroActionList';
 import KnowledgeGraph from '@/components/KnowledgeGraph';
+import EngineStatus from '@/components/EngineStatus';
+import BreadcrumbSidebar from '@/components/BreadcrumbSidebar';
+import BodyDoubleNudge from '@/components/BodyDoubleNudge';
+import AntiParalysisOverlay from '@/components/AntiParalysisOverlay';
+import ReviewFlagBanner from '@/components/ReviewFlagBanner';
 
 // Seed demo tasks so the dial isn't empty on first load
 const DEMO_TASKS = [
@@ -81,8 +92,12 @@ export default function Home() {
   } = useStore();
 
   const { showResumption, context, saveContext, dismiss } = useResumption();
+  const fsmState = useAnchorStore((s) => s.fsm.state);
+  const dispatch = useAnchorStore((s) => s.dispatch);
+  const addSnapshot = useAnchorStore((s) => s.addSnapshot);
+  const checkAntiParalysis = useAnchorStore((s) => s.checkAntiParalysis);
+  const [showAntiParalysis, setShowAntiParalysis] = useState(false);
 
-  // Use demo tasks if store is empty
   const tasks = storedTasks.length > 0 ? storedTasks : DEMO_TASKS;
 
   const selectedTask = useMemo(
@@ -100,7 +115,51 @@ export default function Home() {
     [setSelectedTask]
   );
 
-  // Save resumption context when tab is hidden
+  // ── Body Double Protocol ──
+  useEffect(() => {
+    if (fsmState === 'DEEP_FOCUS') {
+      startBodyDouble(() => {
+        const nudge = (window as unknown as Record<string, unknown>).__bodyDoubleNudge as
+          | ((count: number) => void)
+          | undefined;
+        nudge?.(1);
+      });
+      return () => stopBodyDouble();
+    }
+  }, [fsmState]);
+
+  // ── Mental Snapshot Timer ──
+  useEffect(() => {
+    if (fsmState === 'DEEP_FOCUS' || fsmState === 'TASK_INITIATION') {
+      startSnapshotTimer(
+        (taskId) => {
+          const task = tasks.find((t) => t.id === taskId);
+          addSnapshot(
+            task ? `Working on: ${task.title}` : 'Focused session in progress',
+            taskId
+          );
+        },
+        () => useAnchorStore.getState().fsm.activeTaskId
+      );
+      return () => stopSnapshotTimer();
+    }
+  }, [fsmState, tasks, addSnapshot]);
+
+  // ── Anti-Paralysis Check ──
+  useEffect(() => {
+    if (fsmState !== 'TASK_INITIATION') {
+      setShowAntiParalysis(false);
+      return;
+    }
+    const interval = setInterval(() => {
+      if (checkAntiParalysis()) {
+        setShowAntiParalysis(true);
+      }
+    }, 30_000); // check every 30s
+    return () => clearInterval(interval);
+  }, [fsmState, checkAntiParalysis]);
+
+  // ── Resumption context save on departure ──
   useEffect(() => {
     const handleVisibility = () => {
       if (document.hidden) {
@@ -108,9 +167,7 @@ export default function Home() {
         saveContext(
           lastCapture?.text || '',
           activeTask?.title || '',
-          tasks
-            .filter((t) => t.status === 'active')
-            .map((t) => t.title)
+          tasks.filter((t) => t.status === 'active').map((t) => t.title)
         );
       }
     };
@@ -121,6 +178,9 @@ export default function Home() {
   return (
     <AirlockGatekeeper>
       <div className="min-h-screen bg-zinc-950 flex flex-col">
+        {/* Review Flag Banner */}
+        <ReviewFlagBanner />
+
         {/* Header */}
         <header className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
           <div>
@@ -128,7 +188,7 @@ export default function Home() {
               The External Lobe
             </h1>
             <p className="text-xs text-zinc-500 font-wt-background">
-              Executive function support
+              Triple-Engine Productivity · Pilot + Translator + Anchor
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -141,13 +201,16 @@ export default function Home() {
               href="/explore"
               className="px-3 py-1.5 text-xs text-zinc-500 hover:text-zinc-300 border border-zinc-800 rounded-lg transition-colors"
             >
-              Explore Variations
+              Explore
             </a>
             <motion.button
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.92 }}
               transition={springs.snap}
-              onClick={() => setCaptureOverlayOpen(true)}
+              onClick={() => {
+                setCaptureOverlayOpen(true);
+                dispatch({ type: 'START_CAPTURE' });
+              }}
               className="px-4 py-2 bg-indigo-500 hover:bg-indigo-400 text-white text-sm font-medium rounded-full transition-colors"
             >
               Capture
@@ -157,7 +220,7 @@ export default function Home() {
 
         {/* Main Content */}
         <main className="flex-1 flex flex-col lg:flex-row gap-6 p-6">
-          {/* Dial Column — wrapped in Focus Lens */}
+          {/* Left: Dial + Graph */}
           <FocusLens>
             <div className="flex-1 flex flex-col items-center justify-start gap-6">
               <RadialTimeDial
@@ -165,8 +228,6 @@ export default function Home() {
                 onSelectTask={handleSelectTask}
                 selectedTaskId={selectedTaskId}
               />
-
-              {/* Knowledge Graph */}
               <div className="w-full max-w-[600px]">
                 <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3 px-1">
                   Knowledge Graph
@@ -176,8 +237,11 @@ export default function Home() {
             </div>
           </FocusLens>
 
-          {/* Sidebar */}
+          {/* Right: Sidebar */}
           <aside className="w-full lg:w-96 flex flex-col gap-4">
+            {/* Engine Status */}
+            <EngineStatus />
+
             {/* Focus Card */}
             <FocusCard task={selectedTask} />
 
@@ -198,18 +262,16 @@ export default function Home() {
                     transition={springs.snap}
                     onClick={() => handleSelectTask(task.id)}
                     className={`flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer transition-colors ${
-                      selectedTaskId === task.id
-                        ? 'bg-zinc-800'
-                        : 'hover:bg-zinc-800/50'
+                      selectedTaskId === task.id ? 'bg-zinc-800' : 'hover:bg-zinc-800/50'
                     }`}
                   >
-                    {/* Urgency-colored dot */}
                     <div
                       className="w-3 h-3 rounded-full shrink-0"
                       style={{
-                        backgroundColor: task.status === 'done'
-                          ? '#52525b'
-                          : urgencyColor(task.icnu_score.urgency),
+                        backgroundColor:
+                          task.status === 'done'
+                            ? '#52525b'
+                            : urgencyColor(task.icnu_score.urgency),
                       }}
                     />
                     <span
@@ -236,6 +298,9 @@ export default function Home() {
                 ))}
               </ul>
             </div>
+
+            {/* Breadcrumb Sidebar */}
+            <BreadcrumbSidebar />
 
             {/* Recent Captures */}
             {captures.length > 0 && (
@@ -274,7 +339,18 @@ export default function Home() {
         <LightningCapture />
         <FocusEmber />
         <UndoTimeline />
+        <BodyDoubleNudge />
         <ResumptionCard show={showResumption} context={context} onDismiss={dismiss} />
+        <AntiParalysisOverlay
+          show={showAntiParalysis}
+          taskTitle={activeTask?.title || ''}
+          onDismiss={() => setShowAntiParalysis(false)}
+          onStartAction={(text) => {
+            console.log(`[Anti-Paralysis] Starting: ${text}`);
+            dispatch({ type: 'FOCUS_ACHIEVED' });
+            setShowAntiParalysis(false);
+          }}
+        />
       </div>
     </AirlockGatekeeper>
   );
