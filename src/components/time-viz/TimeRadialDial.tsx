@@ -3,27 +3,13 @@
 import { useMemo, useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { measureRender, logInteractionLatency } from '@/lib/perf';
+import { polarToCartesian, timeToAngle, describeArc } from '@/lib/svg-math';
+import { DEMO_TIME_TASKS as DEMO_TASKS } from '@/lib/demo-data';
 
 /**
  * Variation 2.1 — The Radial Dial (Baseline)
  * Circular SVG 24-hour clock with task arcs, hatch past, glowing "now".
  */
-
-interface TimeTask {
-  id: string;
-  title: string;
-  start_hour: number; // 0-23.99
-  duration_hours: number;
-  color: string;
-}
-
-const DEMO_TASKS: TimeTask[] = [
-  { id: 't1', title: 'Deep Work', start_hour: 9, duration_hours: 2, color: '#6366f1' },
-  { id: 't2', title: 'Lunch', start_hour: 12, duration_hours: 1, color: '#22c55e' },
-  { id: 't3', title: 'Meetings', start_hour: 14, duration_hours: 1.5, color: '#f59e0b' },
-  { id: 't4', title: 'Creative Time', start_hour: 16, duration_hours: 1.5, color: '#ec4899' },
-  { id: 't5', title: 'Wind Down', start_hour: 19, duration_hours: 0.5, color: '#8b5cf6' },
-];
 
 const SIZE = 360;
 const CX = SIZE / 2;
@@ -31,23 +17,11 @@ const CY = SIZE / 2;
 const OR = 155;
 const IR = 95;
 
-function hourToAngle(h: number): number {
-  return (h / 24) * 360 - 90;
-}
-
-function polar(cx: number, cy: number, r: number, deg: number) {
-  const rad = (deg * Math.PI) / 180;
-  return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
-}
-
-function arc(startDeg: number, endDeg: number): string {
-  const s1 = polar(CX, CY, OR, startDeg);
-  const s2 = polar(CX, CY, OR, endDeg);
-  const s3 = polar(CX, CY, IR, endDeg);
-  const s4 = polar(CX, CY, IR, startDeg);
-  const large = endDeg - startDeg > 180 ? 1 : 0;
-  return `M${s1.x},${s1.y} A${OR},${OR} 0 ${large} 1 ${s2.x},${s2.y} L${s3.x},${s3.y} A${IR},${IR} 0 ${large} 0 ${s4.x},${s4.y}Z`;
-}
+// Local helpers that pre-bind the center + radii for this dial.
+const hourToAngle = (h: number) => timeToAngle(h);
+const polar = (cx: number, cy: number, r: number, deg: number) => polarToCartesian(cx, cy, r, deg);
+const arc = (startDeg: number, endDeg: number) =>
+  describeArc(CX, CY, OR, IR, startDeg, endDeg);
 
 export default function TimeRadialDial() {
   const [selected, setSelected] = useState<string | null>(null);

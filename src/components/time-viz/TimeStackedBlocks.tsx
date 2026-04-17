@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { measureRender, logInteractionLatency } from '@/lib/perf';
+import { DEMO_TIME_TASKS as DEMO_TASKS } from '@/lib/demo-data';
 
 /**
  * Variation 2.3 — The Stacked Blocks
@@ -10,22 +11,6 @@ import { measureRender, logInteractionLatency } from '@/lib/perf';
  * A glowing indicator "melts" blocks from the top as time passes.
  * Empty space below = the future.
  */
-
-interface TimeTask {
-  id: string;
-  title: string;
-  start_hour: number;
-  duration_hours: number;
-  color: string;
-}
-
-const DEMO_TASKS: TimeTask[] = [
-  { id: 't1', title: 'Deep Work', start_hour: 9, duration_hours: 2, color: '#6366f1' },
-  { id: 't2', title: 'Lunch', start_hour: 12, duration_hours: 1, color: '#22c55e' },
-  { id: 't3', title: 'Meetings', start_hour: 14, duration_hours: 1.5, color: '#f59e0b' },
-  { id: 't4', title: 'Creative Time', start_hour: 16, duration_hours: 1.5, color: '#ec4899' },
-  { id: 't5', title: 'Wind Down', start_hour: 19, duration_hours: 0.5, color: '#8b5cf6' },
-];
 
 const BLOCK_HEIGHT = 64;
 

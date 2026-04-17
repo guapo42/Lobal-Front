@@ -4,6 +4,7 @@ import { useMemo, useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import type { Task } from '@/types';
 import { urgencyColor, BREATH_CYCLE, springs } from '@/lib/springs';
+import { polarToCartesian, timeToAngle, describeArc } from '@/lib/svg-math';
 import {
   type EnergyLevel,
   calculateFocusScore,
@@ -23,47 +24,6 @@ const CENTER = SIZE / 2;
 const OUTER_R = 170;
 const INNER_R = 100;
 const HOUR_MARKS_R = 180;
-
-function timeToAngle(hours: number, minutes: number = 0): number {
-  const totalHours = hours + minutes / 60;
-  return (totalHours / 24) * 360 - 90;
-}
-
-function degToRad(deg: number): number {
-  return (deg * Math.PI) / 180;
-}
-
-function polarToCartesian(cx: number, cy: number, r: number, angleDeg: number) {
-  const rad = degToRad(angleDeg);
-  return {
-    x: cx + r * Math.cos(rad),
-    y: cy + r * Math.sin(rad),
-  };
-}
-
-function describeArc(
-  cx: number,
-  cy: number,
-  outerR: number,
-  innerR: number,
-  startAngle: number,
-  endAngle: number
-): string {
-  const outerStart = polarToCartesian(cx, cy, outerR, startAngle);
-  const outerEnd = polarToCartesian(cx, cy, outerR, endAngle);
-  const innerStart = polarToCartesian(cx, cy, innerR, endAngle);
-  const innerEnd = polarToCartesian(cx, cy, innerR, startAngle);
-
-  const largeArcFlag = endAngle - startAngle > 180 ? 1 : 0;
-
-  return [
-    `M ${outerStart.x} ${outerStart.y}`,
-    `A ${outerR} ${outerR} 0 ${largeArcFlag} 1 ${outerEnd.x} ${outerEnd.y}`,
-    `L ${innerStart.x} ${innerStart.y}`,
-    `A ${innerR} ${innerR} 0 ${largeArcFlag} 0 ${innerEnd.x} ${innerEnd.y}`,
-    'Z',
-  ].join(' ');
-}
 
 export default function RadialTimeDial({
   tasks,
