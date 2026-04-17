@@ -41,6 +41,9 @@ interface AnchorState {
   reviewFlags: ReviewFlag[];
   focusStreak: number; // consecutive days with 25+ focus minutes
   dailyFocusMinutes: number;
+  // Body Double nudge: counter increments on each nudge event,
+  // components subscribe to it to show a transient overlay.
+  bodyDoubleNudgeCount: number;
 
   // Actions
   dispatch: (event: FSMEvent) => void;
@@ -50,6 +53,7 @@ interface AnchorState {
   checkAntiParalysis: () => boolean;
   getCurrentState: () => FSMState;
   resetDaily: () => void;
+  triggerBodyDoubleNudge: () => void;
 }
 
 export const useAnchorStore = create<AnchorState>()(
@@ -60,6 +64,7 @@ export const useAnchorStore = create<AnchorState>()(
       reviewFlags: [],
       focusStreak: 0,
       dailyFocusMinutes: 0,
+      bodyDoubleNudgeCount: 0,
 
       dispatch: (event) =>
         set((s) => {
@@ -115,6 +120,9 @@ export const useAnchorStore = create<AnchorState>()(
           dailyFocusMinutes: 0,
           snapshots: [],
         })),
+
+      triggerBodyDoubleNudge: () =>
+        set((s) => ({ bodyDoubleNudgeCount: s.bodyDoubleNudgeCount + 1 })),
     }),
     {
       name: 'external-lobe-anchor',

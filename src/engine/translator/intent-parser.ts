@@ -15,6 +15,7 @@
 
 import { requestLLM } from './llm-client';
 import { validateLLMOutput } from '../anchor/schema-validator';
+import { isParsedIntent, isMicroAction, isExpandedThought } from '../anchor/type-guards';
 
 // ── Prompt templates ──
 
@@ -119,11 +120,21 @@ export async function parseIntent(rawInput: string): Promise<{
       temperature: 0.2,
     });
 
-    if (response.parsed && response.validation?.valid) {
+    if (response.parsed && response.validation?.valid && response.validation.sanitized) {
+      // Runtime type guard — prove the sanitized data matches ParsedIntent
+      if (isParsedIntent(response.validation.sanitized)) {
+        return {
+          intent: response.validation.sanitized,
+          fromLLM: true,
+          validationErrors: [],
+        };
+      }
+      // Passed schema but failed shape check — this shouldn't happen
+      // but fall through to heuristic rather than unsafe cast
       return {
-        intent: response.validation.sanitized as unknown as ParsedIntent,
-        fromLLM: true,
-        validationErrors: [],
+        intent: heuristicParse(rawInput),
+        fromLLM: false,
+        validationErrors: ['LLM output passed schema but failed type guard'],
       };
     }
 
@@ -162,14 +173,20 @@ export async function generateMicroActions(
       try {
         const jsonMatch = response.raw.match(/\[[\s\S]*\]/);
         if (jsonMatch) {
-          const actions: MicroAction[] = JSON.parse(jsonMatch[0]);
-          // Validate each action
-          const valid = actions.every((a) => {
-            const v = validateLLMOutput('micro_action', a as unknown as Record<string, unknown>);
-            return v.valid;
-          });
-          if (valid) {
-            return { actions, fromLLM: true };
+          const parsed: unknown = JSON.parse(jsonMatch[0]);
+          if (Array.isArray(parsed)) {
+            // Runtime type guard each element before trusting it
+            const valid = parsed.every((a) => {
+              if (!isMicroAction(a)) return false;
+              const v = validateLLMOutput(
+                'micro_action',
+                a as unknown as Record<string, unknown>
+              );
+              return v.valid;
+            });
+            if (valid) {
+              return { actions: parsed as MicroAction[], fromLLM: true };
+            }
           }
         }
       } catch {
@@ -205,9 +222,9 @@ export async function expandThought(
       temperature: 0.5,
     });
 
-    if (response.parsed) {
+    if (response.parsed && isExpandedThought(response.parsed)) {
       return {
-        expanded: response.parsed as unknown as ExpandedThought,
+        expanded: response.parsed,
         fromLLM: true,
       };
     }

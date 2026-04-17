@@ -2,8 +2,12 @@
 
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { motion } from 'framer-motion';
-import { springs, urgencyColor } from '@/lib/springs';
+import { springs } from '@/lib/springs';
 import { logInteractionLatency, measureRender } from '@/lib/perf';
+
+// Threshold below which we consider the simulation "settled" and
+// halt the animation loop until a user interaction wakes it.
+const SETTLED_VELOCITY_SQ = 0.01;
 
 /**
  * Knowledge Graph with:
@@ -61,6 +65,9 @@ export default function KnowledgeGraph() {
   const [selected, setSelected] = useState<string | null>(null);
   const nodesRef = useRef<KGNode[]>(INITIAL_NODES);
   const animRef = useRef<number>(0);
+  const runningRef = useRef<boolean>(false);
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const visibleRef = useRef<boolean>(true);
   const perf = measureRender('KnowledgeGraph');
 
   useEffect(() => {
@@ -68,8 +75,13 @@ export default function KnowledgeGraph() {
     requestAnimationFrame(() => perf.markEnd(start));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Gravity simulation
+  // Gravity simulation — halts when settled, visibility changes, or off-screen.
   const runSimulation = useCallback(() => {
+    if (!visibleRef.current) {
+      runningRef.current = false;
+      return;
+    }
+
     const nodes = nodesRef.current;
     const LINK_DISTANCE = 100;
     const REPULSION = 2000;
@@ -77,11 +89,12 @@ export default function KnowledgeGraph() {
     const CENTER_GRAVITY = 0.01;
     const DAMPING = 0.85;
 
+    let totalVelocitySq = 0;
+
     for (let i = 0; i < nodes.length; i++) {
       let fx = 0;
       let fy = 0;
 
-      // Repulsion from all other nodes
       for (let j = 0; j < nodes.length; j++) {
         if (i === j) continue;
         const dx = nodes[i].x - nodes[j].x;
@@ -92,7 +105,6 @@ export default function KnowledgeGraph() {
         fy += (dy / dist) * force;
       }
 
-      // Attraction to linked nodes (gravity = visual proximity)
       for (const linkId of nodes[i].links) {
         const target = nodes.find((n) => n.id === linkId);
         if (!target) continue;
@@ -104,7 +116,6 @@ export default function KnowledgeGraph() {
         fy += (dy / dist) * force;
       }
 
-      // Center gravity
       fx += (CENTER_X - nodes[i].x) * CENTER_GRAVITY;
       fy += (CENTER_Y - nodes[i].y) * CENTER_GRAVITY;
 
@@ -112,30 +123,78 @@ export default function KnowledgeGraph() {
       nodes[i].vy = (nodes[i].vy + fy) * DAMPING;
       nodes[i].x = Math.max(40, Math.min(WIDTH - 40, nodes[i].x + nodes[i].vx));
       nodes[i].y = Math.max(40, Math.min(HEIGHT - 40, nodes[i].y + nodes[i].vy));
+
+      totalVelocitySq += nodes[i].vx * nodes[i].vx + nodes[i].vy * nodes[i].vy;
     }
 
     setNodes([...nodes]);
+
+    // Halt when the graph has settled — avoids wasteful continuous renders.
+    if (totalVelocitySq < SETTLED_VELOCITY_SQ) {
+      runningRef.current = false;
+      return;
+    }
+
     animRef.current = requestAnimationFrame(runSimulation);
   }, []);
 
-  useEffect(() => {
+  const startSimulation = useCallback(() => {
+    if (runningRef.current) return;
+    runningRef.current = true;
     animRef.current = requestAnimationFrame(runSimulation);
-    return () => cancelAnimationFrame(animRef.current);
   }, [runSimulation]);
 
-  // Clicking a node bumps its access count (recency/frequency)
-  const selectNode = useCallback((id: string) => {
-    const s = performance.now();
-    setSelected((prev) => (prev === id ? null : id));
-    nodesRef.current = nodesRef.current.map((n) =>
-      n.id === id
-        ? { ...n, accessCount: n.accessCount + 1, lastAccessed: Date.now() }
-        : n
-    );
-    requestAnimationFrame(() =>
-      logInteractionLatency('KnowledgeGraph', 'select-node', performance.now() - s)
-    );
-  }, []);
+  // Lifecycle: start simulation + bind visibility and intersection observers.
+  useEffect(() => {
+    startSimulation();
+
+    const onVisibilityChange = () => {
+      visibleRef.current = !document.hidden;
+      if (!document.hidden) startSimulation();
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
+    let observer: IntersectionObserver | null = null;
+    if (svgRef.current && typeof IntersectionObserver !== 'undefined') {
+      observer = new IntersectionObserver(
+        (entries) => {
+          for (const entry of entries) {
+            const nowVisible = entry.isIntersecting;
+            visibleRef.current = nowVisible && !document.hidden;
+            if (nowVisible && !document.hidden) startSimulation();
+          }
+        },
+        { threshold: 0.05 }
+      );
+      observer.observe(svgRef.current);
+    }
+
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      observer?.disconnect();
+      cancelAnimationFrame(animRef.current);
+      runningRef.current = false;
+    };
+  }, [startSimulation]);
+
+  // Clicking a node bumps its access count (recency/frequency) and wakes sim.
+  const selectNode = useCallback(
+    (id: string) => {
+      const s = performance.now();
+      setSelected((prev) => (prev === id ? null : id));
+      nodesRef.current = nodesRef.current.map((n) =>
+        n.id === id
+          ? { ...n, accessCount: n.accessCount + 1, lastAccessed: Date.now() }
+          : n
+      );
+      // Wake the simulation so nodes can re-cluster around the newly-selected.
+      startSimulation();
+      requestAnimationFrame(() =>
+        logInteractionLatency('KnowledgeGraph', 'select-node', performance.now() - s)
+      );
+    },
+    [startSimulation]
+  );
 
   const selectedNode = useMemo(
     () => nodes.find((n) => n.id === selected),
@@ -152,7 +211,7 @@ export default function KnowledgeGraph() {
 
   return (
     <div className="flex flex-col gap-3">
-      <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} className="w-full rounded-xl border border-zinc-800 bg-zinc-950">
+      <svg ref={svgRef} viewBox={`0 0 ${WIDTH} ${HEIGHT}`} className="w-full rounded-xl border border-zinc-800 bg-zinc-950">
         <defs>
           <filter id="kgGlow">
             <feGaussianBlur stdDeviation="4" />

@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState, useCallback } from 'react';
+import { safeStorage } from '@/lib/safe-storage';
 
 interface ResumptionContext {
   lastText: string;        // Last 50 chars typed
@@ -22,19 +23,14 @@ export function useResumption() {
 
   // On mount, check if we have a saved departure context
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        const parsed: ResumptionContext = JSON.parse(stored);
-        const absenceMs = Date.now() - parsed.leftAt;
-        if (absenceMs >= ABSENCE_THRESHOLD_MS) {
-          setContext(parsed);
-          setShowResumption(true);
-        }
-        localStorage.removeItem(STORAGE_KEY);
+    const parsed = safeStorage.getJSON<ResumptionContext>(STORAGE_KEY);
+    if (parsed) {
+      const absenceMs = Date.now() - parsed.leftAt;
+      if (absenceMs >= ABSENCE_THRESHOLD_MS) {
+        setContext(parsed);
+        setShowResumption(true);
       }
-    } catch {
-      // ignore parse errors
+      safeStorage.remove(STORAGE_KEY);
     }
   }, []);
 
@@ -47,7 +43,7 @@ export function useResumption() {
         openLoops,
         leftAt: Date.now(),
       };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(ctx));
+      safeStorage.setJSON(STORAGE_KEY, ctx);
     },
     []
   );

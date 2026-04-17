@@ -174,17 +174,13 @@ export default function Home() {
   }, [dispatch]);
 
   // ── Body Double Protocol ──
+  const triggerBodyDoubleNudge = useAnchorStore((s) => s.triggerBodyDoubleNudge);
   useEffect(() => {
     if (fsmState === 'DEEP_FOCUS') {
-      startBodyDouble(() => {
-        const nudge = (window as unknown as Record<string, unknown>).__bodyDoubleNudge as
-          | ((count: number) => void)
-          | undefined;
-        nudge?.(1);
-      });
+      startBodyDouble(triggerBodyDoubleNudge);
       return () => stopBodyDouble();
     }
-  }, [fsmState]);
+  }, [fsmState, triggerBodyDoubleNudge]);
 
   // ── Mental Snapshot Timer ──
   useEffect(() => {

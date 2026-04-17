@@ -1,32 +1,27 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { springs, BREATH_CYCLE } from '@/lib/springs';
+import { useAnchorStore } from '@/engine/anchor/store';
 
 /**
  * Body Double Nudge — subtle visual pulse when user
  * returns from a tab switch during DEEP_FOCUS.
  *
- * Not aggressive or guilt-inducing — just a gentle
- * "hey, welcome back" that re-anchors attention.
+ * Subscribes to the Anchor store's bodyDoubleNudgeCount; each
+ * increment triggers a transient overlay.
  */
-
 export default function BodyDoubleNudge() {
+  const nudgeCount = useAnchorStore((s) => s.bodyDoubleNudgeCount);
   const [visible, setVisible] = useState(false);
-  const [switchCount, setSwitchCount] = useState(0);
 
-  const trigger = useCallback((count: number) => {
-    setSwitchCount(count);
+  useEffect(() => {
+    if (nudgeCount === 0) return;
     setVisible(true);
-    // Auto-dismiss after 4 seconds
-    setTimeout(() => setVisible(false), 4000);
-  }, []);
-
-  // Expose trigger method on window for the guardrail to call
-  if (typeof window !== 'undefined') {
-    (window as unknown as Record<string, unknown>).__bodyDoubleNudge = trigger;
-  }
+    const timer = setTimeout(() => setVisible(false), 4000);
+    return () => clearTimeout(timer);
+  }, [nudgeCount]);
 
   return (
     <AnimatePresence>
@@ -57,9 +52,9 @@ export default function BodyDoubleNudge() {
             <div>
               <p className="text-sm text-white font-wt-active">Welcome back</p>
               <p className="text-[10px] text-zinc-500">
-                {switchCount === 1
+                {nudgeCount === 1
                   ? 'You switched away briefly — refocusing.'
-                  : `${switchCount} tab switches this session — stay here.`}
+                  : `${nudgeCount} tab switches this session — stay here.`}
               </p>
             </div>
           </motion.div>
